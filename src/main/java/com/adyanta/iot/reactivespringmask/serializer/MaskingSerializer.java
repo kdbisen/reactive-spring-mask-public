@@ -1,4 +1,4 @@
-package com.adyanta.iot.reactivespringmask;
+package com.adyanta.iot.reactivespringmask.serializer;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonSerializer;
@@ -8,31 +8,18 @@ import java.io.IOException;
 
 public class MaskingSerializer extends JsonSerializer<Object> {
 
-    private final MaskingType type;
+    private final String fieldName;
 
-    public MaskingSerializer(MaskingType type) {
-        this.type = type;
+    public MaskingSerializer(String fieldName) {
+        this.fieldName = fieldName;
     }
 
     @Override
     public void serialize(Object value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
-        if (value == null) {
-            gen.writeNull();
-            return;
-        }
-
-        String strValue = value.toString();
-        switch (type) {
-            case EMAIL:
-                gen.writeString(maskEmail(strValue));
-                break;
-            case PASSWORD:
-                gen.writeString("****"); // fully masked
-                break;
-            case GENERIC:
-            default:
-                gen.writeString("****"); // generic mask
-                break;
+        if ("email".equals(fieldName)) {
+            gen.writeString(maskEmail(value.toString()));
+        } else {
+            gen.writeString("****");
         }
     }
 

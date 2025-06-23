@@ -1,0 +1,42 @@
+During the first half of the year, I have proactively taken on responsibilities that extend beyond my defined role, particularly in the context of integrating new systems with existing platforms. I have played a key role in understanding complex project flows, contributing to solution design, and facilitating cross-functional alignment. In parallel, I continue to share knowledge with peers, lead daily stand-ups, and support the team in navigating technical and delivery-related challenges. These efforts reflect my commitment to both team success and organizational growth through effective leadership and collaboration.
+
+
+
+
+
+ 
+## 🌐 Mid-Year Self-Evaluation Commentary
+
+---
+
+### **1. Risk and Control Performance Commentary**
+
+In the first half of the year, I have ensured that all deliverables align with risk and control frameworks, especially while working on critical systems like the **EMC client onboarding portal**. Given the sensitivity and complexity of this platform, I paid close attention to data flow, access control, and compliance adherence, minimizing risk exposure during both development and integration phases.
+
+Collaborating across regions and time zones, I proactively identified potential control gaps early in the lifecycle and worked with relevant teams to mitigate them. In parallel, I’ve contributed to fostering a risk-aware culture by **sharing best practices** with peers and supporting control validation at the integration level. For the remainder of the year, I will continue focusing on **secure system integration**, especially as we progress with **OMC platform alignment**.
+
+---
+
+### **2. Financial Performance Commentary**
+
+My contributions have directly supported the organization’s financial objectives through **cost-saving system integrations** and platform efficiency improvements. Notably, I am driving technical efforts in the integration between **EMC, OMC, and related systems**, where streamlined redirection and modular design are expected to significantly reduce operational overhead and licensing costs.
+
+Additionally, I have embraced **new technologies like Kotlin and Gradle** to modernize development workflows, reduce build times, and improve code maintainability. These initiatives, along with mentoring team members in adopting these tools, are creating long-term value by increasing productivity and reducing tech debt. For the second half of the year, I aim to advance automation and observability improvements to drive further financial impact.
+
+---
+
+### **3. Client and Franchisee Outcome Performance Commentary**
+
+Delivering a better client and franchisee experience has been a strong focus this year. Through my work on the **Developer Portal**, I contributed to simplifying integration for external developers, enhancing onboarding, and reducing friction for partner engagement. On the **EMC portal**, I worked across functional teams to ensure a responsive, intuitive, and reliable experience for clients and internal users alike.
+
+In addition to development, I have taken a **leadership role in coordinating day-to-day stand-ups**, clarifying requirements across geographies, and **sharing domain knowledge with the team** to maintain delivery momentum and clarity. I’ve built strong bridges across teams to ensure that franchisee needs are understood and addressed in our technical solutions. My focus moving forward will be on enhancing user experience through continuous feedback loops and accelerating the delivery of impactful client-facing features.
+
+---
+
+### 🔭 **Focus for the Remainder of the Year**
+
+* Lead the next phase of integration across platforms with an emphasis on control, performance, and user impact.
+* Continue applying and sharing knowledge of **Kotlin**, **Gradle**, and other modern tools within the team to uplift engineering standards.
+* Deepen collaboration with risk, infra, and client delivery teams across time zones.
+* Drive efforts in automation, performance tuning, and scalable design for long-term business efficiency.
+ 

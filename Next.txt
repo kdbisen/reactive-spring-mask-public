@@ -1,0 +1,182 @@
+// File: MaskingAndNullCleaningResultHandler.kt
+
+import com.fasterxml.jackson.databind.JsonNode import com.fasterxml.jackson.databind.ObjectMapper import com.fasterxml.jackson.databind.node.* import org.springframework.core.MethodParameter import org.springframework.http.MediaType import org.springframework.http.codec.HttpMessageWriter import org.springframework.web.reactive.result.HandlerResult import org.springframework.web.reactive.result.HandlerResultHandler import org.springframework.web.server.ServerWebExchange import reactor.core.publisher.Mono
+
+class MaskingAndNullCleaningResultHandler( private val writers: List<HttpMessageWriter<>>, private val objectMapper: ObjectMapper, private val maskedFields: List<String>, // Dot paths: e.g. "user.password" private val maskValue: String = "**" ) : HandlerResultHandler {
+
+override fun supports(result: HandlerResult): Boolean = true
+
+override fun handleResult(exchange: ServerWebExchange, result: HandlerResult): Mono<Void> {
+    val returnValue = result.returnValue
+    val returnType = result.returnTypeSource?.methodParameters?.firstOrNull()?.parameterType ?: Any::class.java
+
+    return if (returnValue is Mono<*>) {
+        returnValue
+            .map { objectMapper.valueToTree<JsonNode>(it) }
+            .map { maskAndClean(it) }
+            .flatMap { cleaned ->
+                getWriter(result).write(
+                    Mono.just(cleaned),
+                    cleaned.javaClass,
+                    MediaType.APPLICATION_JSON,
+                    exchange.response,
+                    null
+                )
+            }
+    } else {
+        val node = objectMapper.valueToTree<JsonNode>(returnValue)
+        val cleaned = maskAndClean(node)
+        return getWriter(result).write(
+            Mono.just(cleaned),
+            cleaned.javaClass,
+            MediaType.APPLICATION_JSON,
+            exchange.response,
+            null
+        )
+    }
+}
+
+private fun getWriter(result: HandlerResult): HttpMessageWriter<Any> {
+    @Suppress("UNCHECKED_CAST")
+    return writers
+        .filterIsInstance<HttpMessageWriter<Any>>()
+        .firstOrNull { it.canWrite(result.returnTypeSource!!, MediaType.APPLICATION_JSON) }
+        ?: throw IllegalStateException("No suitable writer found")
+}
+
+private fun maskAndClean(node: JsonNode): JsonNode {
+    val masked = maskFields(node.deepCopy(), maskedFields)
+    return removeNullsRecursively(masked)
+}
+
+private fun maskFields(node: JsonNode, fieldsToMask: List<String>): JsonNode {
+    fieldsToMask.forEach { path ->
+        val parts = path.split(".")
+        maskPath(node, parts)
+    }
+    return node
+}
+
+private fun maskPath(node: JsonNode?, pathParts: List<String>) {
+    if (node == null || pathParts.isEmpty()) return
+
+    val current = pathParts[0]
+    val remaining = pathParts.drop(1)
+
+    when (node) {
+        is ObjectNode -> {
+            val child = node.get(current)
+            if (child != null) {
+                if (remaining.isEmpty()) {
+                    node.put(current, maskValue)
+                } else {
+                    maskPath(child, remaining)
+                }
+            }
+        }
+        is ArrayNode -> node.forEach { item -> maskPath(item, pathParts) }
+    }
+}
+
+private fun removeNullsRecursively(node: JsonNode?): JsonNode {
+    if (node == null || node.isNull) return MissingNode.getInstance()
+
+    return when (node) {
+        is ObjectNode -> {
+            val toRemove = mutableListOf<String>()
+            val fields = node.fieldNames()
+            while (fields.hasNext()) {
+                val field = fields.next()
+                val child = node[field]
+                val cleaned = removeNullsRecursively(child)
+                if (cleaned.isMissingNode || cleaned.isNull) {
+                    toRemove.add(field)
+                } else {
+                    node.set<JsonNode>(field, cleaned)
+                }
+            }
+            toRemove.forEach { node.remove(it) }
+            node
+        }
+
+        is ArrayNode -> {
+            val cleanedArray = ArrayNode(JsonNodeFactory.instance)
+            node.forEach { item ->
+                val cleaned = removeNullsRecursively(item)
+                if (!cleaned.isMissingNode && !cleaned.isNull) {
+                    cleanedArray.add(cleaned)
+                }
+            }
+            cleanedArray
+        }
+
+        else -> node
+    }
+}
+
+}
+
+
+
+// File: MaskingAndNullCleaningResultHandlerTest.kt
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Test
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
+
+class MaskingAndNullCleaningResultHandlerTest {
+
+    private val objectMapper: ObjectMapper = jacksonObjectMapper()
+    private val maskedFields = listOf("user.password", "profile.ssn")
+
+    private val handler = MaskingAndNullCleaningResultHandler(
+        writers = emptyList(), // not used in test
+        objectMapper = objectMapper,
+        maskedFields = maskedFields
+    )
+
+    @Test
+    fun `should mask and remove nulls recursively`() {
+        val json = """
+            {
+              "user": {
+                "name": "Alice",
+                "password": "secret123",
+                "email": null
+              },
+              "profile": {
+                "ssn": "123-45-6789",
+                "dob": null
+              },
+              "metadata": null,
+              "tags": [null, "iot", null]
+            }
+        """.trimIndent()
+
+        val inputNode = objectMapper.readTree(json)
+        val resultNode = handler.run {
+            val masked = this.javaClass.getDeclaredMethod("maskAndClean", JsonNode::class.java)
+            masked.isAccessible = true
+            masked.invoke(this, inputNode) as ObjectNode
+        }
+
+        val expectedJson = """
+            {
+              "user": {
+                "name": "Alice",
+                "password": "***"
+              },
+              "profile": {
+                "ssn": "***"
+              },
+              "tags": ["iot"]
+            }
+        """.trimIndent()
+
+        val expectedNode = objectMapper.readTree(expectedJson)
+        assertEquals(expectedNode, resultNode)
+    }
+}
+

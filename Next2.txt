@@ -1,0 +1,279 @@
+Great — you want to use a custom annotation on controller methods to:
+
+✅ Dynamically mask specific fields in the response
+✅ Do this without modifying DTOs
+✅ Keep camelCase and original structure intact
+✅ Possibly combine this with null-field removal
+
+
+---
+
+✅ What We’ll Do
+
+1. Define a custom annotation like @MaskResponse(fields = ["user.password", "profile.ssn"])
+
+2. Use a HandlerResultHandler or ResponseBodyAdvice equivalent for WebFlux
+
+3. Intercept the response body, apply masking logic dynamically
+
+4. Keep this annotation-driven and flexible
+
+
+---
+
+✅ Step-by-Step Implementation (Kotlin + Spring WebFlux)
+
+🔹 Step 1: Create the Annotation
+
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class MaskResponse(
+    val fields: Array<String> = [],
+    val maskValue: String = "***"
+)
+
+
+---
+
+🔹 Step 2: Annotate Your Controller Method
+
+import org.springframework.web.bind.annotation.*
+
+@RestController
+@RequestMapping("/api")
+class UserController {
+
+    @GetMapping("/user")
+    @MaskResponse(fields = ["user.password", "profile.ssn"])
+    fun getUser(): Map<String, Any?> {
+        return mapOf(
+            "user" to mapOf(
+                "name" to "Alice",
+                "password" to "secret123",
+                "email" to null
+            ),
+            "profile" to mapOf(
+                "ssn" to "123-45-6789",
+                "dob" to null
+            ),
+            "metadata" to null
+        )
+    }
+}
+
+
+---
+
+🔹 Step 3: Create a Custom HandlerResultHandler
+
+This handler will:
+
+Look for the @MaskResponse annotation
+
+Apply masking and null removal
+
+Serialize the modified response
+
+
+import com.fasterxml.jackson.databind.*
+import com.fasterxml.jackson.databind.node.*
+import org.springframework.core.MethodParameter
+import org.springframework.http.MediaType
+import org.springframework.http.codec.HttpMessageWriter
+import org.springframework.web.reactive.result.method.HandlerResult
+import org.springframework.web.reactive.result.method.HandlerResultHandler
+import org.springframework.web.server.ServerWebExchange
+import reactor.core.publisher.Mono
+import kotlin.reflect.full.findAnnotation
+
+class AnnotationDrivenMaskingHandler(
+    private val writers: List<HttpMessageWriter<*>>,
+    private val objectMapper: ObjectMapper
+) : HandlerResultHandler {
+
+    override fun supports(result: HandlerResult): Boolean = true
+
+    override fun handleResult(exchange: ServerWebExchange, result: HandlerResult): Mono<Void> {
+        val method = result.handlerMethod?.method
+        val annotation = method?.getAnnotation(MaskResponse::class.java)
+
+        if (annotation == null) {
+            // No masking needed
+            return result.returnValue?.let { rv ->
+                if (rv is Mono<*>) {
+                    rv.flatMap {
+                        val node = objectMapper.valueToTree<JsonNode>(it)
+                        val cleaned = removeNullsRecursively(node)
+                        write(cleaned, exchange, result)
+                    }
+                } else {
+                    val node = objectMapper.valueToTree<JsonNode>(rv)
+                    val cleaned = removeNullsRecursively(node)
+                    write(cleaned, exchange, result)
+                }
+            } ?: Mono.empty()
+        }
+
+        val maskedFields = annotation.fields
+        val maskValue = annotation.maskValue
+
+        return result.returnValue?.let { rv ->
+            if (rv is Mono<*>) {
+                rv.map { objectMapper.valueToTree<JsonNode>(it) }
+                    .map { maskAndClean(it, maskedFields, maskValue) }
+                    .flatMap { write(it, exchange, result) }
+            } else {
+                val node = objectMapper.valueToTree<JsonNode>(rv)
+                val masked = maskAndClean(node, maskedFields, maskValue)
+                write(masked, exchange, result)
+            }
+        } ?: Mono.empty()
+    }
+
+    private fun write(json: JsonNode, exchange: ServerWebExchange, result: HandlerResult): Mono<Void> {
+        @Suppress("UNCHECKED_CAST")
+        val writer = writers
+            .filterIsInstance<HttpMessageWriter<Any>>()
+            .firstOrNull { it.canWrite(result.returnTypeSource!!, MediaType.APPLICATION_JSON) }
+            ?: throw IllegalStateException("No suitable writer found")
+
+        return writer.write(Mono.just(json), json.javaClass, MediaType.APPLICATION_JSON, exchange.response, null)
+    }
+
+    private fun maskAndClean(node: JsonNode, fields: Array<String>, maskValue: String): JsonNode {
+        val masked = maskFields(node.deepCopy(), fields.toList(), maskValue)
+        return removeNullsRecursively(masked)
+    }
+
+    private fun maskFields(node: JsonNode, fieldsToMask: List<String>, maskValue: String): JsonNode {
+        fieldsToMask.forEach { path ->
+            val parts = path.split(".")
+            maskPath(node, parts, maskValue)
+        }
+        return node
+    }
+
+    private fun maskPath(node: JsonNode?, pathParts: List<String>, maskValue: String) {
+        if (node == null || pathParts.isEmpty()) return
+
+        val current = pathParts[0]
+        val remaining = pathParts.drop(1)
+
+        when (node) {
+            is ObjectNode -> {
+                val child = node.get(current)
+                if (child != null) {
+                    if (remaining.isEmpty()) {
+                        node.put(current, maskValue)
+                    } else {
+                        maskPath(child, remaining, maskValue)
+                    }
+                }
+            }
+
+            is ArrayNode -> node.forEach { item -> maskPath(item, pathParts, maskValue) }
+        }
+    }
+
+    private fun removeNullsRecursively(node: JsonNode?): JsonNode {
+        if (node == null || node.isNull) return MissingNode.getInstance()
+
+        return when (node) {
+            is ObjectNode -> {
+                val toRemove = mutableListOf<String>()
+                node.fieldNames().forEachRemaining { field ->
+                    val cleaned = removeNullsRecursively(node[field])
+                    if (cleaned.isMissingNode || cleaned.isNull) {
+                        toRemove.add(field)
+                    } else {
+                        node.set<JsonNode>(field, cleaned)
+                    }
+                }
+                toRemove.forEach { node.remove(it) }
+                node
+            }
+
+            is ArrayNode -> {
+                val array = ArrayNode(JsonNodeFactory.instance)
+                node.forEach {
+                    val cleaned = removeNullsRecursively(it)
+                    if (!cleaned.isMissingNode && !cleaned.isNull) {
+                        array.add(cleaned)
+                    }
+                }
+                array
+            }
+
+            else -> node
+        }
+    }
+}
+
+
+---
+
+🔹 Step 4: Register It
+
+In your @Configuration class:
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.springframework.context.annotation.Configuration
+import org.springframework.http.codec.ServerCodecConfigurer
+import org.springframework.web.reactive.config.WebFluxConfigurer
+import org.springframework.web.reactive.result.method.annotation.RequestMappingHandlerAdapter
+import javax.annotation.PostConstruct
+
+@Configuration
+class WebFluxHandlerConfig(
+    private val handlerAdapter: RequestMappingHandlerAdapter,
+    private val codecConfigurer: ServerCodecConfigurer,
+    private val objectMapper: ObjectMapper
+) : WebFluxConfigurer {
+
+    @PostConstruct
+    fun init() {
+        handlerAdapter.setCustomHandlerResultHandlers(
+            listOf(
+                AnnotationDrivenMaskingHandler(codecConfigurer.writers, objectMapper)
+            )
+        )
+    }
+}
+
+
+---
+
+✅ Final Result
+
+Controller:
+
+@MaskResponse(fields = ["user.password", "profile.ssn"])
+@GetMapping("/user")
+fun getUser(): Mono<Map<String, Any?>> = ...
+
+Output:
+
+{
+  "user": {
+    "name": "Alice",
+    "password": "***"
+  },
+  "profile": {
+    "ssn": "***"
+  }
+}
+
+
+---
+
+Would you like:
+
+File download links for this full project?
+
+Support for masking based on annotations on DTO fields (e.g., @Mask)?
+
+Add tests for this logic?
+
+
+Let me know how far you'd like to take it!
+
